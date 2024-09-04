@@ -52,6 +52,13 @@ class OffboardControl(Node):
         self.altitude_error_integral = 0.0
         self.altitude_control_time = self.get_clock().now().nanoseconds
 
+        # Control gains
+        self.roll_angle_max = 0.3 # in radians (max roll angle)
+        self.pitch_angle_max = 0.3  # in radians (max pitch angle)
+
+        self.yaw_gain = 1.0 # in radians (yaw rate gain)
+        self.throttle_gain = 0.3 # in meters (max altitude change per second)
+
         # PID gains
         self.Kp = 0.1
         self.Ki = 0.01
@@ -91,6 +98,12 @@ class OffboardControl(Node):
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0)
         self.get_logger().info("Switching to offboard mode")
+    
+    def kill_vehicle(self):
+        """Send a kill command to the vehicle."""
+        self.publish_vehicle_command(
+            VehicleCommand.VEHICLE_CMD_DO_FLIGHTTERMINATION, param1=1.0)
+        self.get_logger().info('Kill command sent')
 
     def publish_offboard_control_heartbeat_signal(self):
         """Publish the offboard control mode."""
@@ -160,29 +173,39 @@ class OffboardControl(Node):
         if self.offboard_setpoint_counter == 10:
             self.engage_offboard_mode()
 
-        # Arm/disarm based on button 0 state
-        if self.joy_axes[6] == -1:
+            # Kill the vehicle if axis 7 is pressed
+        if self.joy_axes[2] == -1.0 and not getattr(self, 'kill_sent', False):
+            self.kill_vehicle()
+            self.kill_sent = True
+        elif self.joy_axes[7] != -1.0:
+            self.kill_sent = False  # Reset kill flag when axis 7 is not pressed
+
+        # Arm/disarm based on button 5 state with logic to ensure command is sent only once
+        if self.joy_axes[5] == -1 and not getattr(self, 'arm_sent', False):
             if not self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
                 self.arm()
+                self.arm_sent = True
+        #elif self.joy_axes[5] != -1 and self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
+        #    if not getattr(self, 'disarm_sent', False):
+        #        self.disarm()
+        #        self.disarm_sent = True
         else:
-            if self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
-                self.disarm()
+            self.arm_sent = False
+            self.disarm_sent = False  # Reset flags when conditions are not met
 
         if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
             # Get joystick inputs
-            roll = - self.joy_axes[1]  # Assuming axis 0 for roll
-            pitch = self.joy_axes[2]  # Assuming axis 1 for pitch
-            yaw_rate = - self.joy_axes[3]  # Assuming axis 2 for yaw rate
+            roll =  - self.joy_axes[3] * self.roll_angle_max  
+            pitch = - self.joy_axes[4] * self.pitch_angle_max 
+            yaw_rate =  - self.joy_axes[0] * self.yaw_gain 
 
 
             # Throttle control for altitude
-            throttle = - self.joy_axes[0]  # Assuming axis 1 for throttle
+            throttle = self.joy_axes[1]  
 
-            # Update desired altitude based on throttle input
-            if throttle > 0.1:
-                self.desired_altitude += throttle * 0.1  # Adjust scaling factor as needed
-            elif throttle < -0.1:
-                self.desired_altitude += throttle * 0.1  # Adjust scaling factor as needed
+            # Adjust desired altitude if throttle is outside the dead zone of ±0.1
+            if abs(throttle) > 0.1:
+                self.desired_altitude += throttle * self.throttle_gain  # Adjust scaling factor as needed
 
             # Ensure desired altitude is non-negative
             self.desired_altitude = max(self.desired_altitude, 0.0)
