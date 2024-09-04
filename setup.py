@@ -22,7 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'offboard_control = px4_ros_offboard.offboard_control:main',
+            'altitude_hold_control = px4_ros_offboard.altitude_hold_control:main',
         ],
     },
 )

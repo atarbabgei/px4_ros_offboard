@@ -10,11 +10,11 @@ import math
 import time
 from px4_ros_offboard.joy_inputs import JoystickInputs
 
-class OffboardControl(Node):
-    """Node for controlling a vehicle in offboard mode."""
+class AltholdControl(Node):
+    """Node for controlling a vehicle in altitude hold mode."""
 
     def __init__(self) -> None:
-        super().__init__('offboard_control_takeoff_and_land')
+        super().__init__('altitude_hold_control')
 
         # Initialize joystick inputs
         self.joystick_inputs = JoystickInputs(self)
@@ -140,7 +140,6 @@ class OffboardControl(Node):
         msg.reset_integral = False
         msg.fw_control_yaw_wheel = False
         self.attitude_setpoint_publisher.publish(msg)
-        #self.get_logger().info(f"Publishing attitude setpoint: roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
 
     def publish_vehicle_command(self, command, **params) -> None:
         """Publish a vehicle command."""
@@ -181,7 +180,7 @@ class OffboardControl(Node):
                 self.arm_sent = True
         elif not self.joystick_inputs.is_arm_pressed():
             self.arm_sent = False  # Reset arm flag when the arm button is not pressed
-
+            
         if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
             # Get joystick inputs using JoystickInputs methods
             roll = -self.joystick_inputs.get_roll() * self.roll_angle_max  
@@ -238,9 +237,9 @@ class OffboardControl(Node):
 def main(args=None) -> None:
     print('Starting offboard control node...')
     rclpy.init(args=args)
-    offboard_control = OffboardControl()
-    rclpy.spin(offboard_control)
-    offboard_control.destroy_node()
+    alt_hold_control = AltholdControl()
+    rclpy.spin(alt_hold_control)
+    alt_hold_control.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
