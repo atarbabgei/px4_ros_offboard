@@ -8,12 +8,16 @@ from px4_msgs.msg import OffboardControlMode, VehicleAttitudeSetpoint, VehicleCo
 import numpy as np
 import math
 import time
+from px4_ros_offboard.joy_inputs import JoystickInputs
 
 class OffboardControl(Node):
     """Node for controlling a vehicle in offboard mode."""
 
     def __init__(self) -> None:
         super().__init__('offboard_control_takeoff_and_land')
+
+        # Initialize joystick inputs
+        self.joystick_inputs = JoystickInputs(self)
 
         # Configure QoS profile for publishing and subscribing
         qos_profile = QoSProfile(
@@ -35,15 +39,11 @@ class OffboardControl(Node):
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_status_subscriber = self.create_subscription(
             VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
-        self.joy_subscriber = self.create_subscription(
-            Joy, '/joy', self.joy_callback, 10)  # Using default QoS profile for Joy
 
         # Initialize variables
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
-        self.joy_axes = [0.0, 0.0, 0.0, 0.0]  # Initialize joystick axes
-        self.joy_buttons = [0] * 12  # Initialize joystick buttons, assuming 12 buttons
         self.current_yaw = 0.0  # Initialize the current yaw angle
         self.desired_altitude = 0.0  # Initialize the desired altitude to 0 meters
 
@@ -76,11 +76,6 @@ class OffboardControl(Node):
         """Callback function for vehicle_status topic subscriber."""
         self.vehicle_status = vehicle_status
 
-    def joy_callback(self, joy_msg):
-        """Callback function for joy topic subscriber."""
-        self.joy_axes = joy_msg.axes
-        self.joy_buttons = joy_msg.buttons
-
     def arm(self):
         """Send an arm command to the vehicle."""
         self.publish_vehicle_command(
@@ -98,7 +93,7 @@ class OffboardControl(Node):
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0)
         self.get_logger().info("Switching to offboard mode")
-    
+
     def kill_vehicle(self):
         """Send a kill command to the vehicle."""
         self.publish_vehicle_command(
@@ -173,35 +168,28 @@ class OffboardControl(Node):
         if self.offboard_setpoint_counter == 10:
             self.engage_offboard_mode()
 
-            # Kill the vehicle if axis 7 is pressed
-        if self.joy_axes[2] == -1.0 and not getattr(self, 'kill_sent', False):
+        # Use methods from JoystickInputs
+        if self.joystick_inputs.is_kill_pressed() and not getattr(self, 'kill_sent', False):
             self.kill_vehicle()
             self.kill_sent = True
-        elif self.joy_axes[7] != -1.0:
-            self.kill_sent = False  # Reset kill flag when axis 7 is not pressed
+        elif not self.joystick_inputs.is_kill_pressed():
+            self.kill_sent = False  # Reset kill flag when the kill button is not pressed
 
-        # Arm/disarm based on button 5 state with logic to ensure command is sent only once
-        if self.joy_axes[5] == -1 and not getattr(self, 'arm_sent', False):
+        if self.joystick_inputs.is_arm_pressed() and not getattr(self, 'arm_sent', False):
             if not self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
                 self.arm()
                 self.arm_sent = True
-        #elif self.joy_axes[5] != -1 and self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
-        #    if not getattr(self, 'disarm_sent', False):
-        #        self.disarm()
-        #        self.disarm_sent = True
-        else:
-            self.arm_sent = False
-            self.disarm_sent = False  # Reset flags when conditions are not met
+        elif not self.joystick_inputs.is_arm_pressed():
+            self.arm_sent = False  # Reset arm flag when the arm button is not pressed
 
         if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-            # Get joystick inputs
-            roll =  - self.joy_axes[3] * self.roll_angle_max  
-            pitch = - self.joy_axes[4] * self.pitch_angle_max 
-            yaw_rate =  - self.joy_axes[0] * self.yaw_gain 
-
+            # Get joystick inputs using JoystickInputs methods
+            roll = -self.joystick_inputs.get_roll() * self.roll_angle_max  
+            pitch = -self.joystick_inputs.get_pitch() * self.pitch_angle_max 
+            yaw_rate = -self.joystick_inputs.get_yaw() * self.yaw_gain 
 
             # Throttle control for altitude
-            throttle = self.joy_axes[1]  
+            throttle = self.joystick_inputs.get_throttle()  
 
             # Adjust desired altitude if throttle is outside the dead zone of ±0.1
             if abs(throttle) > 0.1:
@@ -214,7 +202,7 @@ class OffboardControl(Node):
             self.current_yaw += yaw_rate 
 
             # Altitude control
-            current_altitude = - self.vehicle_local_position.z
+            current_altitude = -self.vehicle_local_position.z
             altitude_error = self.desired_altitude - current_altitude
             thrust = self.calculate_thrust(altitude_error)
 
