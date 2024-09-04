@@ -8,5 +8,4 @@ axes:
 
 buttons:
   arm: 5          # Button index for arm control
-  disarm: 6       # Button index for disarm control
-  kill: 4         # Button index for kill control
+  kill: 4         # Button index for emergency kill control
