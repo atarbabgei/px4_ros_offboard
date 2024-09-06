@@ -1,0 +1,11 @@
+# joy_inputs_config.yaml
+
+axes:
+  roll: 3         # Axis index for roll control
+  pitch: 2        # Axis index for pitch control
+  yaw: 1          # Axis index for yaw control
+  throttle: 0     # Axis index for throttle control
+
+buttons:
+  arm: 1          # Button index for arm control
+  kill: 2         # Button index for emergency kill control

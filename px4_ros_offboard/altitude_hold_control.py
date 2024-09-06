@@ -8,12 +8,16 @@ from px4_msgs.msg import OffboardControlMode, VehicleAttitudeSetpoint, VehicleCo
 import numpy as np
 import math
 import time
+from px4_ros_offboard.joy_inputs import JoystickInputs
 
-class OffboardControl(Node):
-    """Node for controlling a vehicle in offboard mode."""
+class AltholdControl(Node):
+    """Node for controlling a vehicle in altitude hold mode."""
 
     def __init__(self) -> None:
-        super().__init__('offboard_control_takeoff_and_land')
+        super().__init__('altitude_hold_control')
+
+        # Initialize joystick inputs
+        self.joystick_inputs = JoystickInputs(self)
 
         # Configure QoS profile for publishing and subscribing
         qos_profile = QoSProfile(
@@ -35,15 +39,11 @@ class OffboardControl(Node):
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_status_subscriber = self.create_subscription(
             VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
-        self.joy_subscriber = self.create_subscription(
-            Joy, '/joy', self.joy_callback, 10)  # Using default QoS profile for Joy
 
         # Initialize variables
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
-        self.joy_axes = [0.0, 0.0, 0.0, 0.0]  # Initialize joystick axes
-        self.joy_buttons = [0] * 12  # Initialize joystick buttons, assuming 12 buttons
         self.current_yaw = 0.0  # Initialize the current yaw angle
         self.desired_altitude = 0.0  # Initialize the desired altitude to 0 meters
 
@@ -51,6 +51,13 @@ class OffboardControl(Node):
         self.altitude_error_previous = 0.0
         self.altitude_error_integral = 0.0
         self.altitude_control_time = self.get_clock().now().nanoseconds
+
+        # Control gains
+        self.roll_angle_max = 0.3 # in radians (max roll angle)
+        self.pitch_angle_max = 0.3  # in radians (max pitch angle)
+
+        self.yaw_gain = 1.0 # in radians (yaw rate gain)
+        self.throttle_gain = 0.3 # in meters (max altitude change per second)
 
         # PID gains
         self.Kp = 0.1
@@ -69,11 +76,6 @@ class OffboardControl(Node):
         """Callback function for vehicle_status topic subscriber."""
         self.vehicle_status = vehicle_status
 
-    def joy_callback(self, joy_msg):
-        """Callback function for joy topic subscriber."""
-        self.joy_axes = joy_msg.axes
-        self.joy_buttons = joy_msg.buttons
-
     def arm(self):
         """Send an arm command to the vehicle."""
         self.publish_vehicle_command(
@@ -91,6 +93,12 @@ class OffboardControl(Node):
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0)
         self.get_logger().info("Switching to offboard mode")
+
+    def kill_vehicle(self):
+        """Send a kill command to the vehicle."""
+        self.publish_vehicle_command(
+            VehicleCommand.VEHICLE_CMD_DO_FLIGHTTERMINATION, param1=1.0)
+        self.get_logger().info('Kill command sent')
 
     def publish_offboard_control_heartbeat_signal(self):
         """Publish the offboard control mode."""
@@ -132,7 +140,6 @@ class OffboardControl(Node):
         msg.reset_integral = False
         msg.fw_control_yaw_wheel = False
         self.attitude_setpoint_publisher.publish(msg)
-        #self.get_logger().info(f"Publishing attitude setpoint: roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
 
     def publish_vehicle_command(self, command, **params) -> None:
         """Publish a vehicle command."""
@@ -160,29 +167,32 @@ class OffboardControl(Node):
         if self.offboard_setpoint_counter == 10:
             self.engage_offboard_mode()
 
-        # Arm/disarm based on button 0 state
-        if self.joy_axes[6] == -1:
+        # Use methods from JoystickInputs
+        if self.joystick_inputs.is_kill_pressed() and not getattr(self, 'kill_sent', False):
+            self.kill_vehicle()
+            self.kill_sent = True
+        elif not self.joystick_inputs.is_kill_pressed():
+            self.kill_sent = False  # Reset kill flag when the kill button is not pressed
+
+        if self.joystick_inputs.is_arm_pressed() and not getattr(self, 'arm_sent', False):
             if not self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
                 self.arm()
-        else:
-            if self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
-                self.disarm()
-
+                self.arm_sent = True
+        elif not self.joystick_inputs.is_arm_pressed():
+            self.arm_sent = False  # Reset arm flag when the arm button is not pressed
+            
         if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-            # Get joystick inputs
-            roll = - self.joy_axes[1]  # Assuming axis 0 for roll
-            pitch = self.joy_axes[2]  # Assuming axis 1 for pitch
-            yaw_rate = - self.joy_axes[3]  # Assuming axis 2 for yaw rate
-
+            # Get joystick inputs using JoystickInputs methods
+            roll = -self.joystick_inputs.get_roll() * self.roll_angle_max  
+            pitch = -self.joystick_inputs.get_pitch() * self.pitch_angle_max 
+            yaw_rate = -self.joystick_inputs.get_yaw() * self.yaw_gain 
 
             # Throttle control for altitude
-            throttle = - self.joy_axes[0]  # Assuming axis 1 for throttle
+            throttle = self.joystick_inputs.get_throttle()  
 
-            # Update desired altitude based on throttle input
-            if throttle > 0.1:
-                self.desired_altitude += throttle * 0.1  # Adjust scaling factor as needed
-            elif throttle < -0.1:
-                self.desired_altitude += throttle * 0.1  # Adjust scaling factor as needed
+            # Adjust desired altitude if throttle is outside the dead zone of ±0.1
+            if abs(throttle) > 0.1:
+                self.desired_altitude += throttle * self.throttle_gain  # Adjust scaling factor as needed
 
             # Ensure desired altitude is non-negative
             self.desired_altitude = max(self.desired_altitude, 0.0)
@@ -191,7 +201,7 @@ class OffboardControl(Node):
             self.current_yaw += yaw_rate 
 
             # Altitude control
-            current_altitude = - self.vehicle_local_position.z
+            current_altitude = -self.vehicle_local_position.z
             altitude_error = self.desired_altitude - current_altitude
             thrust = self.calculate_thrust(altitude_error)
 
@@ -227,9 +237,9 @@ class OffboardControl(Node):
 def main(args=None) -> None:
     print('Starting offboard control node...')
     rclpy.init(args=args)
-    offboard_control = OffboardControl()
-    rclpy.spin(offboard_control)
-    offboard_control.destroy_node()
+    alt_hold_control = AltholdControl()
+    rclpy.spin(alt_hold_control)
+    alt_hold_control.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
