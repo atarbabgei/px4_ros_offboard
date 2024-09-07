@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import Joy
 from px4_msgs.msg import OffboardControlMode, VehicleAttitudeSetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
 import numpy as np
 import math
-import time
 from px4_ros_offboard.joy_inputs import JoystickInputs
 
 class AltholdControl(Node):

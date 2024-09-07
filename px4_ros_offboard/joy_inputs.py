@@ -39,7 +39,7 @@ class JoystickInputs:
         if not config_file_path:
             # Use default file path if no parameter provided
             package_share_directory = get_package_share_directory('px4_ros_offboard')
-            config_file_path = os.path.join(package_share_directory, 'config', 'joy_config.yaml')
+            config_file_path = os.path.join(package_share_directory, 'config', 'keyboard_joy_config.yaml')
 
         # Load the YAML file
         try:

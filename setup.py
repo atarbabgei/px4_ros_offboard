@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'altitude_hold_control = px4_ros_offboard.altitude_hold_control:main',
+            'velocity_control = px4_ros_offboard.velocity_control:main',
         ],
     },
 )
