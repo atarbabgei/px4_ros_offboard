@@ -26,6 +26,7 @@ setup(
             'altitude_hold_control = px4_ros_offboard.altitude_hold_control:main',
             'velocity_control = px4_ros_offboard.velocity_control:main',
             'manual_control = px4_ros_offboard.manual_control:main',
+            'position_control = px4_ros_offboard.position_control:main',
         ],
     },
 )
