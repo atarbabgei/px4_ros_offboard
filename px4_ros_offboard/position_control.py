@@ -3,10 +3,11 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from px4_msgs.msg import OffboardControlMode, VehicleCommand, VehicleLocalPosition, TrajectorySetpoint, VehicleStatus
+from px4_msgs.msg import OffboardControlMode, GotoSetpoint, VehicleCommand, VehicleLocalPosition, TrajectorySetpoint, VehicleStatus
 from geometry_msgs.msg import Twist
 import numpy as np
 from math import pi
+
 
 from px4_ros_offboard.joy_inputs import JoystickInputs  # Ensure this is correctly imported
 
@@ -22,6 +23,7 @@ class PositionControl(Node):
         # Fetch the parameter value
         self.use_world_frame = self.get_parameter('use_world_frame').get_parameter_value().bool_value
         self.get_logger().info(f"Position control frame set to {'World frame (NED)' if self.use_world_frame else 'Vehicle-relative frame (FLU)'}")
+
 
         # Initialize joystick inputs
         self.joystick_inputs = JoystickInputs(self)
@@ -40,6 +42,9 @@ class PositionControl(Node):
             VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
         self.trajectory_setpoint_publisher = self.create_publisher(
             TrajectorySetpoint, '/fmu/in/trajectory_setpoint', qos_profile)
+        # In the __init__ method, replace the publisher for trajectory setpoint with goto_setpoint
+        self.goto_setpoint_publisher = self.create_publisher(
+            GotoSetpoint, '/fmu/in/goto_setpoint', qos_profile)
 
         # Create subscribers
         self.vehicle_status_subscriber = self.create_subscription(
@@ -54,10 +59,11 @@ class PositionControl(Node):
         self.current_position = [0.0, 0.0, 0.0]  # Initialize current position
 
         # Control parameters
+        self.yaw_setpoint = 0.0  # Desired yaw setpoint
         self.position_setpoint = [0.0, 0.0, 0.0]  # Desired position setpoint
         self.max_position_change = 0.5  # Maximum position change per input in meters
         self.max_position_rate = 1.0  # Limit rate of position change in meters per second
-        self.yaw_gain = pi / 8  # Maximum yaw rate in rad/s
+        self.yaw_gain = 0.1  # Maximum yaw rate in rad/s
 
         # Create a timer to publish control commands
         self.timer = self.create_timer(0.02, self.timer_callback)  # Increased frequency for smoother control
@@ -148,8 +154,11 @@ class PositionControl(Node):
             throttle_input = self.joystick_inputs.get_throttle()  # Up/down
             yaw_input = self.joystick_inputs.get_yaw()      # Yaw rate
 
-            # Get the current yaw angle
-            self.current_yaw += (-yaw_input * self.yaw_gain)
+            # Calculate shortest angular distance for yaw setpoint adjustment
+            yaw_delta = -yaw_input * self.yaw_gain
+            yaw_difference = self.shortest_angular_distance(self.current_yaw, self.current_yaw + yaw_delta)
+            self.yaw_setpoint = self.current_yaw + yaw_difference
+            self.yaw_setpoint = self.normalize_angle(self.yaw_setpoint)
 
             # Update position setpoints with rate limiting
             self.position_setpoint[0] += self.limit_position_change(self.current_position[0], roll_input * self.max_position_change)
@@ -160,11 +169,22 @@ class PositionControl(Node):
                 self.position_setpoint[2] = 0
 
             # Publish the new setpoint
-            self.publish_trajectory_setpoint(self.position_setpoint[0], self.position_setpoint[1], -self.position_setpoint[2], self.current_yaw)
+            #self.publish_trajectory_setpoint(self.position_setpoint[0], self.position_setpoint[1], -self.position_setpoint[2], self.current_yaw)
+            # Publish_trajectory_setpoint with publish_goto_setpoint
+            self.publish_goto_setpoint(self.position_setpoint[1], -self.position_setpoint[0], -self.position_setpoint[2], self.yaw_setpoint)
 
         if self.offboard_setpoint_counter < 11:
             self.offboard_setpoint_counter += 1
 
+    def normalize_angle(self, angle):
+        """Normalize an angle to the range -pi to pi."""
+        return (angle + pi) % (2 * pi) - pi
+    
+    def shortest_angular_distance(self, from_angle, to_angle):
+        """Calculate the shortest distance between two angles."""
+        delta_angle = to_angle - from_angle
+        return (delta_angle + pi) % (2 * pi) - pi
+    
     def limit_position_change(self, current_value, desired_change):
         """Limit the rate of change for the position setpoint."""
         max_change = self.max_position_rate * 0.02  # Limit rate to max_position_rate m/s
@@ -178,10 +198,23 @@ class PositionControl(Node):
         msg.velocity = [float('nan'), float('nan'), float('nan')]
         msg.acceleration = [float('nan'), float('nan'), float('nan')]
         msg.jerk = [float('nan'), float('nan'), float('nan')]
-        msg.yaw = yaw
+        msg.yaw = float(yaw)
         msg.yawspeed = float('nan')
         self.trajectory_setpoint_publisher.publish(msg)
-
+    def publish_goto_setpoint(self, position_x: float, position_y: float, position_z: float, heading: float):
+        """Publish the position setpoint as a GotoSetpoint."""
+        msg = GotoSetpoint()
+        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        msg.position = [float(position_x), float(position_y), float(position_z)]
+        msg.flag_control_heading = True
+        msg.heading = heading
+        msg.flag_set_max_horizontal_speed = False
+        msg.max_horizontal_speed = 0.0
+        msg.flag_set_max_vertical_speed = False
+        msg.max_vertical_speed = 0.0
+        msg.flag_set_max_heading_rate = False
+        msg.max_heading_rate = 0.0
+        self.goto_setpoint_publisher.publish(msg)
 
 def main(args=None) -> None:
     print('Starting offboard position control node with joystick inputs...')
