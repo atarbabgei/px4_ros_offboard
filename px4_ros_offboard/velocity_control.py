@@ -53,8 +53,8 @@ class VelocityControl(Node):
         self.trueYaw = 0.0  # Initialize the current yaw angle
 
         # Control parameters
-        self.max_velocity = 2.0  # Maximum velocity in m/s for x, y
-        self.max_velocity_vertical = 2.0  # Maximum velocity in m/s for z (vertical speed)
+        self.max_velocity = 1.0  # Maximum velocity in m/s for x, y
+        self.max_velocity_vertical = 0.5  # Maximum velocity in m/s for z (vertical speed)
         self.yaw_gain = pi / 4  # Maximum yaw rate in rad/s
 
         # Joystick velocity and yaw inputs
@@ -156,8 +156,8 @@ class VelocityControl(Node):
 
             if self.use_world_frame:
                 # Publish the velocity setpoint in the world frame (NED)
-                velocity_x = self.velocity.linear.y
-                velocity_y = - self.velocity.linear.x
+                velocity_x = - self.velocity.linear.x
+                velocity_y = - self.velocity.linear.y
                 velocity_z = self.velocity.linear.z
                 self.publish_trajectory_setpoint(velocity_x, velocity_y, velocity_z, self.velocity.angular.z)
            
