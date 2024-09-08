@@ -54,7 +54,7 @@ class AltholdControl(Node):
         self.pitch_angle_max = 0.3  # in radians (max pitch angle)
 
         self.yaw_gain = 1.0 # in radians (yaw rate gain)
-        self.throttle_gain = 0.3 # in meters (max altitude change per second)
+        self.throttle_gain = 0.1 # in meters (max altitude change per second)
 
         # PID gains
         self.Kp = 0.1
