@@ -58,13 +58,25 @@ class AltholdControl(Node):
         
         # TODO: Tune the PID gains for altitude control
         # PID gains (adjusted for more responsiveness)
-        self.Kp = 0.25
-        self.Ki = 0.02
-        self.Kd = 0.1
+
+        self.declare_parameter('Kp', 0.25)
+        self.declare_parameter('Ki', 0.02)
+        self.declare_parameter('Kd', 0.1)
+        self.Kp = self.get_parameter('Kp').value
+        self.Ki = self.get_parameter('Ki').value
+        self.Kd = self.get_parameter('Kd').value
+
+        self.declare_parameter('roll_offset', 0.0)
+        self.declare_parameter('pitch_offset', 0.0)
 
         # Add roll and pitch offsets (to be adjusted as needed for level flight)
-        self.roll_offset = 0.0  # in radians (roll offset)
-        self.pitch_offset = 0.0  # in radians (pitch offset)
+        self.roll_offset = self.get_parameter('roll_offset').value  # in radians (roll offset)
+        self.pitch_offset = self.get_parameter('pitch_offset').value  # in radians (pitch offset)
+        
+        # make sure the roll and pitch offsets are within the limits
+        self.roll_offset = np.clip(self.roll_offset, -self.roll_angle_max, self.roll_angle_max)
+        self.pitch_offset = np.clip(self.pitch_offset, -self.pitch_angle_max, self.pitch_angle_max)
+
 
         # Create a timer to publish control commands
         self.timer = self.create_timer(0.1, self.timer_callback)
@@ -101,8 +113,10 @@ class AltholdControl(Node):
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_FLIGHTTERMINATION, param1=1.0)
         self.get_logger().info('Kill command sent')
-        self.desired_altitude = 0.0  # set desired altitude to 0
-        self.get_logger().info('reset desired altitude to 0')
+        # Reset desired altitude, altitude error, and integral term when the vehicle is killed 
+        self.desired_altitude = 0.0
+        self.altitude_error_previous = 0.0
+        self.altitude_error_integral = 0.0  
 
     def publish_offboard_control_heartbeat_signal(self):
         """Publish the offboard control mode."""
@@ -185,7 +199,7 @@ class AltholdControl(Node):
         elif not self.joystick_inputs.is_arm_pressed():
             self.arm_sent = False  # Reset arm flag when the arm button is not pressed
             
-        if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+        if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD and self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
             # Get joystick inputs using JoystickInputs methods
             roll = -self.joystick_inputs.get_roll() * self.roll_angle_max  
             pitch = -self.joystick_inputs.get_pitch() * self.pitch_angle_max 
@@ -193,6 +207,15 @@ class AltholdControl(Node):
 
             # Throttle control for altitude
             throttle = self.joystick_inputs.get_throttle()  
+
+            # Add roll and pitch offsets (to be adjusted as needed for level flight)
+            self.roll_offset = self.get_parameter('roll_offset').value  # in radians (roll offset)
+            self.pitch_offset = self.get_parameter('pitch_offset').value  # in radians (pitch offset)
+            
+            max_offset = 0.02 # in radians
+            # make sure the roll and pitch offsets are within the limits
+            self.roll_offset = np.clip(self.roll_offset, -max_offset, max_offset)
+            self.pitch_offset = np.clip(self.pitch_offset, -max_offset, max_offset)
 
             # add roll and pitch offset
             roll += self.roll_offset
@@ -219,7 +242,11 @@ class AltholdControl(Node):
 
             altitude_error = self.desired_altitude - current_altitude
             thrust = self.calculate_thrust(altitude_error)
-            
+
+            # log roll, pitch, yaw, thrust, current and altitude error
+            self.get_logger().info(f"Roll: {roll}, Pitch: {pitch}, Yaw: {self.current_yaw}, Thrust: {thrust}") 
+            # log current altitude, desired altitude and altitude error
+            self.get_logger().info(f"Current altitude: {current_altitude}, Desired altitude: {self.desired_altitude}, Altitude error: {altitude_error}")
             # Send attitude setpoint based on joystick input
             self.publish_attitude_setpoint(roll, pitch, self.current_yaw, thrust)
 
@@ -231,6 +258,10 @@ class AltholdControl(Node):
         current_time = self.get_clock().now().nanoseconds
         dt = (current_time - self.altitude_control_time) / 1e9  # Convert to seconds
         self.altitude_control_time = current_time
+
+        self.Kp = self.get_parameter('Kp').value
+        self.Ki = self.get_parameter('Ki').value
+        self.Kd = self.get_parameter('Kd').value
 
         # Proportional term
         P = self.Kp * altitude_error
