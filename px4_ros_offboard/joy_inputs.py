@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
@@ -76,6 +75,21 @@ class JoystickInputs:
         """Check if the arm button is pressed based on the configuration."""
         arm_button_index = self.buttons_mapping.get('arm', -1)
         return self.joy_buttons[arm_button_index] == 1 if arm_button_index >= 0 and len(self.joy_buttons) > arm_button_index else False
+
+    def is_takeoff_pressed(self):
+        """Check if the takeoff button is pressed based on the configuration."""
+        takeoff_button_index = self.buttons_mapping.get('takeoff', -1)
+        return self.joy_buttons[takeoff_button_index] == 1 if takeoff_button_index >= 0 and len(self.joy_buttons) > takeoff_button_index else False
+
+    def is_start_trajectory_pressed(self):
+        """Check if the start trajectory button is pressed based on the configuration."""
+        start_trajectory_button_index = self.buttons_mapping.get('start_trajectory', -1)
+        return self.joy_buttons[start_trajectory_button_index] == 1 if start_trajectory_button_index >= 0 and len(self.joy_buttons) > start_trajectory_button_index else False
+
+    def is_stop_trajectory_pressed(self):
+        """Check if the stop trajectory button is pressed based on the configuration."""
+        stop_trajectory_button_index = self.buttons_mapping.get('stop_trajectory', -1)
+        return self.joy_buttons[stop_trajectory_button_index] == 1 if stop_trajectory_button_index >= 0 and len(self.joy_buttons) > stop_trajectory_button_index else False
 
     def get_roll(self):
         """Get the roll axis value based on the configuration."""

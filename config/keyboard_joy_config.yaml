@@ -9,3 +9,6 @@ axes:
 buttons:
   arm: 1          # Button index for arm control
   kill: 2         # Button index for emergency kill control
+  takeoff: 3      # Button index for takeoff control
+  start_trajectory: 4 # Button index for starting trajectory
+  stop_trajectory: 5  # Button index for stopping trajectory

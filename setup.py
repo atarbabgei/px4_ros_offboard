@@ -27,6 +27,7 @@ setup(
             'velocity_control = px4_ros_offboard.velocity_control:main',
             'manual_control = px4_ros_offboard.manual_control:main',
             'position_control = px4_ros_offboard.position_control:main',
+            'trajectory_planner = px4_ros_offboard.trajectory_planner:main',
         ],
     },
 )
