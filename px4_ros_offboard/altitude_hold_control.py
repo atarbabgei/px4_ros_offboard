@@ -53,13 +53,18 @@ class AltholdControl(Node):
         self.roll_angle_max = 0.3 # in radians (max roll angle)
         self.pitch_angle_max = 0.3  # in radians (max pitch angle)
 
-        self.yaw_gain = 1.0 # in radians (yaw rate gain)
+        self.yaw_gain = 0.5 # in radians (yaw rate gain)
         self.throttle_gain = 0.1 # in meters (max altitude change per second)
+        
+        # TODO: Tune the PID gains for altitude control
+        # PID gains (adjusted for more responsiveness)
+        self.Kp = 0.25
+        self.Ki = 0.02
+        self.Kd = 0.1
 
-        # PID gains
-        self.Kp = 0.1
-        self.Ki = 0.01
-        self.Kd = 0.05
+        # Add roll and pitch offsets (to be adjusted as needed for level flight)
+        self.roll_offset = 0.0  # in radians (roll offset)
+        self.pitch_offset = 0.0  # in radians (pitch offset)
 
         # Create a timer to publish control commands
         self.timer = self.create_timer(0.1, self.timer_callback)
@@ -96,6 +101,8 @@ class AltholdControl(Node):
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_FLIGHTTERMINATION, param1=1.0)
         self.get_logger().info('Kill command sent')
+        self.desired_altitude = 0.0  # set desired altitude to 0
+        self.get_logger().info('reset desired altitude to 0')
 
     def publish_offboard_control_heartbeat_signal(self):
         """Publish the offboard control mode."""
@@ -187,10 +194,14 @@ class AltholdControl(Node):
             # Throttle control for altitude
             throttle = self.joystick_inputs.get_throttle()  
 
+            # add roll and pitch offset
+            roll += self.roll_offset
+            pitch += self.pitch_offset
+
             # Adjust desired altitude if throttle is outside the dead zone of ±0.1
             if abs(throttle) > 0.1:
                 self.desired_altitude += throttle * self.throttle_gain  # Adjust scaling factor as needed
-
+            
             # Ensure desired altitude is non-negative
             self.desired_altitude = max(self.desired_altitude, 0.0)
 
@@ -199,9 +210,16 @@ class AltholdControl(Node):
 
             # Altitude control
             current_altitude = -self.vehicle_local_position.z
+
+            # Limit the desired altitude to within 1 meter of the current altitude
+            altitude_error_limit = 1.0
+            self.desired_altitude = np.clip(self.desired_altitude, 
+                                            current_altitude - altitude_error_limit, 
+                                            current_altitude + altitude_error_limit)
+
             altitude_error = self.desired_altitude - current_altitude
             thrust = self.calculate_thrust(altitude_error)
-
+            
             # Send attitude setpoint based on joystick input
             self.publish_attitude_setpoint(roll, pitch, self.current_yaw, thrust)
 
