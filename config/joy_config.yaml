@@ -5,6 +5,8 @@ axes:
   pitch: 4        # Axis index for pitch control
   yaw: 0          # Axis index for yaw control
   throttle: 1     # Axis index for throttle control
+  roll_trim: 6    # Axis index for roll trim control
+  pitch_trim: 7   # Axis index for pitch trim control
 
 buttons:
   arm: 5          # Button index for arm control

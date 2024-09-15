@@ -96,3 +96,13 @@ class JoystickInputs:
         """Get the throttle axis value based on the configuration."""
         throttle_axis_index = self.axes_mapping.get('throttle', -1)
         return self.joy_axes[throttle_axis_index] if throttle_axis_index >= 0 and len(self.joy_axes) > throttle_axis_index else 0.0
+
+    def get_roll_trim(self):
+        """Get the roll_trim axis value based on the configuration."""
+        roll_trim_axis_index = self.axes_mapping.get('roll_trim', -1)
+        return self.joy_axes[roll_trim_axis_index] if roll_trim_axis_index >= 0 and len(self.joy_axes) > roll_trim_axis_index else 0.0
+
+    def get_pitch_trim(self):
+        """Get the pitch_trim axis value based on the configuration."""
+        pitch_trim_axis_index = self.axes_mapping.get('pitch_trim', -1)
+        return self.joy_axes[pitch_trim_axis_index] if pitch_trim_axis_index >= 0 and len(self.joy_axes) > pitch_trim_axis_index else 0.0

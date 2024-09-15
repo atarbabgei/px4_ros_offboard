@@ -208,10 +208,16 @@ class AltholdControl(Node):
             # Throttle control for altitude
             throttle = self.joystick_inputs.get_throttle()  
 
+            self.roll_trim = self.joystick_inputs.get_roll_trim()
+            self.pitch_trim = self.joystick_inputs.get_pitch_trim()
+
             # Add roll and pitch offsets (to be adjusted as needed for level flight)
             self.roll_offset = self.get_parameter('roll_offset').value  # in radians (roll offset)
             self.pitch_offset = self.get_parameter('pitch_offset').value  # in radians (pitch offset)
             
+            self.roll_offset += self.roll_trim
+            self.pitch_offset += self.pitch_trim
+
             max_offset = 0.02 # in radians
             # make sure the roll and pitch offsets are within the limits
             self.roll_offset = np.clip(self.roll_offset, -max_offset, max_offset)
@@ -243,10 +249,10 @@ class AltholdControl(Node):
             altitude_error = self.desired_altitude - current_altitude
             thrust = self.calculate_thrust(altitude_error)
 
-            # log roll, pitch, yaw, thrust, current and altitude error
+            # log roll, pitch, yaw, and thrust
             self.get_logger().info(f"Roll: {roll}, Pitch: {pitch}, Yaw: {self.current_yaw}, Thrust: {thrust}") 
             # log current altitude, desired altitude and altitude error
-            self.get_logger().info(f"Current altitude: {current_altitude}, Desired altitude: {self.desired_altitude}, Altitude error: {altitude_error}")
+            #self.get_logger().info(f"Current altitude: {current_altitude}, Desired altitude: {self.desired_altitude}, Altitude error: {altitude_error}")
             # Send attitude setpoint based on joystick input
             self.publish_attitude_setpoint(roll, pitch, self.current_yaw, thrust)
 
