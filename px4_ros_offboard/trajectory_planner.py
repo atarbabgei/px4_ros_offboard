@@ -5,7 +5,9 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from px4_msgs.msg import OffboardControlMode, GotoSetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
 from px4_ros_offboard.joy_inputs import JoystickInputs  # Ensure this is correctly imported
+import pandas as pd
 
+import numpy as np 
 class TrajectoryPlanner(Node):
     """Node for controlling a vehicle in position control mode using joystick inputs."""
 
@@ -37,18 +39,36 @@ class TrajectoryPlanner(Node):
         self.current_position = [0.0, 0.0, 0.0]
         self.current_state = "IDLE"
         self.last_state = self.current_state
-        self.trajectory_points = [
-            (-1.0, -1.0, -1.0),
-            (1.0, -1.0, -1.0),
-            (1.0, 1.0, -1.0),
-            (-1.0, 1.0, -1.0)
-        ]
+
+        
+        self.start_x = 2.0
+        self.start_y = 0.0
+        self.start_z = 3.0  # Altitude to takeoff to 3.0
+
+
+
+        data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory.csv')
+
+        x = data['Drone_X']
+        y = data['Drone_Y']
+        z = data['Drone_Z']
+        
+        # Convert to numpy array
+        data = np.array([x, y, z])
+        
+        # Transpose the array to get the structure (x, y, z) for each point
+        data_transposed = data.T
+        
+        # Convert to list of tuples
+        self.trajectory_points = [tuple(point) for point in data_transposed]
+        
+
         self.current_trajectory_point = 0
         self.trajectory_wait_counter = 0
-        self.max_wait_ticks = int(2.0 / 0.02)  # Calculate number of ticks for 2 seconds (50 Hz timer)
+        self.max_wait_ticks = 1  # Calculate number of ticks for 2 seconds (50 Hz timer)
 
         # Create a timer to publish control commands
-        self.timer = self.create_timer(0.02, self.timer_callback)
+        self.timer = self.create_timer(0.005, self.timer_callback)
 
     def vehicle_status_callback(self, vehicle_status):
         """Callback function for vehicle_status topic subscriber."""
@@ -152,7 +172,7 @@ class TrajectoryPlanner(Node):
                     self.takeoff_sent = False
 
             elif self.current_state == "TAKEOFF":
-                self.publish_goto_setpoint(0.0, 0.0, -1.0, self.current_yaw)
+                self.publish_goto_setpoint(self.start_x, self.start_y, self.start_z, self.current_yaw)
                 self.get_logger().info("Taking off to 1 meters above the ground")
                 if self.joystick_inputs.is_start_trajectory_pressed() and not getattr(self, 'start_trajectory_sent', False):
                     self.current_state = "TRAJECTORY"
@@ -168,7 +188,7 @@ class TrajectoryPlanner(Node):
 
             elif self.current_state == "HOLD":
                 self.get_logger().info("Holding at this position until stop trajectory command is received")
-                self.publish_goto_setpoint(self.current_position[0], self.current_position[1], self.current_position[2], self.current_yaw)
+                self.publish_goto_setpoint(self.current_position[0], self.current_position[1], - self.current_position[2], self.current_yaw)
                 if self.joystick_inputs.is_stop_trajectory_pressed() and not getattr(self, 'stop_trajectory_sent', False):
                     self.current_state = "IDLE"
                     self.get_logger().info("LANDING and State changed to IDLE")
@@ -213,8 +233,8 @@ class TrajectoryPlanner(Node):
         """Publish the position setpoint as a GotoSetpoint."""
         msg = GotoSetpoint()
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        msg.position = [float(position_x), float(position_y), float(position_z)]
-        msg.flag_control_heading = True
+        msg.position = [float(position_x), float(position_y), - float(position_z)]
+        msg.flag_control_heading = False
         msg.heading = heading
         msg.flag_set_max_horizontal_speed = False
         msg.max_horizontal_speed = 0.0
