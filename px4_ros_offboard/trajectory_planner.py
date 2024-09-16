@@ -40,18 +40,19 @@ class TrajectoryPlanner(Node):
         self.current_state = "IDLE"
         self.last_state = self.current_state
 
+        self.height_offset = 0.5  # Offset to add to the z position
         
         self.start_x = 2.0
         self.start_y = 0.0
-        self.start_z = 3.0  # Altitude to takeoff to 3.0
+        self.start_z = 3.0 - self.height_offset   # Altitude to takeoff to 3.0
 
 
 
-        data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory.csv')
+        data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory_reduced_smallest.csv')
 
         x = data['Drone_X']
         y = data['Drone_Y']
-        z = data['Drone_Z']
+        z = data['Drone_Z'] - self.height_offset 
         
         # Convert to numpy array
         data = np.array([x, y, z])
@@ -65,10 +66,10 @@ class TrajectoryPlanner(Node):
 
         self.current_trajectory_point = 0
         self.trajectory_wait_counter = 0
-        self.max_wait_ticks = 1  # Calculate number of ticks for 2 seconds (50 Hz timer)
+
 
         # Create a timer to publish control commands
-        self.timer = self.create_timer(0.005, self.timer_callback)
+        self.timer = self.create_timer(0.02, self.timer_callback)
 
     def vehicle_status_callback(self, vehicle_status):
         """Callback function for vehicle_status topic subscriber."""
@@ -173,7 +174,7 @@ class TrajectoryPlanner(Node):
 
             elif self.current_state == "TAKEOFF":
                 self.publish_goto_setpoint(self.start_x, self.start_y, self.start_z, self.current_yaw)
-                self.get_logger().info("Taking off to 1 meters above the ground")
+                self.get_logger().info("Taking off to 2 meters above the ground")
                 if self.joystick_inputs.is_start_trajectory_pressed() and not getattr(self, 'start_trajectory_sent', False):
                     self.current_state = "TRAJECTORY"
                     self.get_logger().info("State changed to TRAJECTORY")
@@ -207,27 +208,17 @@ class TrajectoryPlanner(Node):
             self.get_logger().info(f"State changed to {self.current_state}")
 
     def execute_trajectory(self):
-        """Execute the trajectory with a 2-second delay between points."""
-        if self.trajectory_wait_counter == 0:
+        # If we've completed all points, hold the position
+        if self.current_trajectory_point >= len(self.trajectory_points):
+            self.current_state = "HOLD"
+            self.get_logger().info("Trajectory complete, switching to HOLD")
+        
+        else:
             # Send the next point
             point = self.trajectory_points[self.current_trajectory_point]
             self.publish_goto_setpoint(point[0], point[1], point[2], self.current_yaw)
             self.get_logger().info(f"Moving to point {point}")
-            self.trajectory_wait_counter += 1  # Start counting
-
-        elif self.trajectory_wait_counter < self.max_wait_ticks:
-            # Wait until the counter reaches the max_wait_ticks (2 seconds)
-            self.trajectory_wait_counter += 1
-
-        else:
-            # Move to the next point in the trajectory
             self.current_trajectory_point += 1
-            self.trajectory_wait_counter = 0  # Reset wait counter
-
-            # If we've completed all points, hold the position
-            if self.current_trajectory_point >= len(self.trajectory_points):
-                self.current_state = "HOLD"
-                self.get_logger().info("Trajectory complete, switching to HOLD")
 
     def publish_goto_setpoint(self, position_x: float, position_y: float, position_z: float, heading: float):
         """Publish the position setpoint as a GotoSetpoint."""
@@ -236,12 +227,12 @@ class TrajectoryPlanner(Node):
         msg.position = [float(position_x), float(position_y), - float(position_z)]
         msg.flag_control_heading = False
         msg.heading = heading
-        msg.flag_set_max_horizontal_speed = False
-        msg.max_horizontal_speed = 0.0
-        msg.flag_set_max_vertical_speed = False
-        msg.max_vertical_speed = 0.0
-        msg.flag_set_max_heading_rate = False
-        msg.max_heading_rate = 0.0
+        msg.flag_set_max_horizontal_speed = True
+        msg.max_horizontal_speed = 20.0
+        msg.flag_set_max_vertical_speed = True
+        msg.max_vertical_speed = 20.0
+        msg.flag_set_max_heading_rate = True
+        msg.max_heading_rate = 20.0
         self.goto_setpoint_publisher.publish(msg)
 
 
