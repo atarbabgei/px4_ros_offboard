@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from px4_msgs.msg import OffboardControlMode, GotoSetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
+from px4_msgs.msg import OffboardControlMode, GotoSetpoint, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
 from px4_ros_offboard.joy_inputs import JoystickInputs  # Ensure this is correctly imported
 import pandas as pd
 
@@ -27,6 +27,8 @@ class TrajectoryPlanner(Node):
         self.offboard_control_mode_publisher = self.create_publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
         self.vehicle_command_publisher = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
         self.goto_setpoint_publisher = self.create_publisher(GotoSetpoint, '/fmu/in/goto_setpoint', qos_profile)
+        self.trajectory_setpoint_publisher = self.create_publisher(
+            TrajectorySetpoint, '/fmu/in/trajectory_setpoint', qos_profile)
 
         # Subscribers
         self.vehicle_status_subscriber = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
@@ -37,18 +39,18 @@ class TrajectoryPlanner(Node):
         self.vehicle_status = VehicleStatus()
         self.current_yaw = 0.0
         self.current_position = [0.0, 0.0, 0.0]
+        self.last_position = [0.0, 0.0, 0.0]
         self.current_state = "IDLE"
         self.last_state = self.current_state
 
-        self.height_offset = 0.5  # Offset to add to the z position
+        self.height_offset = 0.9  # Offset to add to the z position
         
         self.start_x = 2.0
         self.start_y = 0.0
-        self.start_z = 3.0 - self.height_offset   # Altitude to takeoff to 3.0
+        self.start_z = 3.0# - self.height_offset   # Altitude to takeoff to 3.0
 
 
-
-        data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory_reduced_smallest.csv')
+        data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory_reduced_smallest_v2.csv')
 
         x = data['Drone_X']
         y = data['Drone_Y']
@@ -167,7 +169,7 @@ class TrajectoryPlanner(Node):
                     if self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
                         self.current_state = "TAKEOFF"
                         self.get_logger().info("State changed to TAKEOFF")
-                         # Takeoff
+                        # Takeoff
                         self.takeoff_sent = True
                 elif not self.joystick_inputs.is_takeoff_pressed():
                     self.takeoff_sent = False
@@ -188,8 +190,11 @@ class TrajectoryPlanner(Node):
                 self.execute_trajectory()
 
             elif self.current_state == "HOLD":
-                self.get_logger().info("Holding at this position until stop trajectory command is received")
-                self.publish_goto_setpoint(self.current_position[0], self.current_position[1], - self.current_position[2], self.current_yaw)
+                # Hold at the last trajectory point
+                if self.trajectory_points:
+                    last_point = self.trajectory_points[-1]
+                    self.publish_trajectory_setpoint(last_point[0], last_point[1], last_point[2], self.current_yaw)
+                self.get_logger().info("Holding at the last trajectory point until stop trajectory command is received")
                 if self.joystick_inputs.is_stop_trajectory_pressed() and not getattr(self, 'stop_trajectory_sent', False):
                     self.current_state = "IDLE"
                     self.get_logger().info("LANDING and State changed to IDLE")
@@ -197,7 +202,7 @@ class TrajectoryPlanner(Node):
                     self.stop_trajectory_sent = True
                 elif not self.joystick_inputs.is_stop_trajectory_pressed():
                     self.stop_trajectory_sent = False
-                    
+
         # Increment offboard counter for enabling offboard mode
         if self.offboard_setpoint_counter < 11:
             self.offboard_setpoint_counter += 1
@@ -208,7 +213,7 @@ class TrajectoryPlanner(Node):
             self.get_logger().info(f"State changed to {self.current_state}")
 
     def execute_trajectory(self):
-        # If we've completed all points, hold the position
+        # If we've completed all points, switch to HOLD state
         if self.current_trajectory_point >= len(self.trajectory_points):
             self.current_state = "HOLD"
             self.get_logger().info("Trajectory complete, switching to HOLD")
@@ -216,7 +221,7 @@ class TrajectoryPlanner(Node):
         else:
             # Send the next point
             point = self.trajectory_points[self.current_trajectory_point]
-            self.publish_goto_setpoint(point[0], point[1], point[2], self.current_yaw)
+            self.publish_trajectory_setpoint(point[0], point[1], point[2], self.current_yaw)
             self.get_logger().info(f"Moving to point {point}")
             self.current_trajectory_point += 1
 
@@ -234,6 +239,18 @@ class TrajectoryPlanner(Node):
         msg.flag_set_max_heading_rate = True
         msg.max_heading_rate = 20.0
         self.goto_setpoint_publisher.publish(msg)
+    
+    def publish_trajectory_setpoint(self, position_x: float, position_y: float, position_z: float, yaw: float):
+        """Publish the position setpoint as a TrajectorySetpoint."""
+        msg = TrajectorySetpoint()
+        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        msg.position = [float(position_x), float(position_y), - float(position_z)]
+        msg.velocity = [float('nan'), float('nan'), float('nan')]
+        msg.acceleration = [float('nan'), float('nan'), float('nan')]
+        msg.jerk = [float('nan'), float('nan'), float('nan')]
+        msg.yaw = yaw
+        msg.yawspeed = float('nan')
+        self.trajectory_setpoint_publisher.publish(msg)
 
 
 def main(args=None) -> None:
