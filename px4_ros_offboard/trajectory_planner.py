@@ -40,14 +40,14 @@ class TrajectoryPlanner(Node):
         self.current_state = "IDLE"
         self.last_state = self.current_state
 
-        self.height_offset = 0.9  # Offset to add to the z position
+        self.height_offset = 0.5  # Offset to add to the z position
 
-        self.start_x = 1.0
+        self.start_x = 2.0
         self.start_y = 0.0
-        self.start_z = 3.0 - self.height_offset   # Altitude to takeoff to 3.0
+        self.start_z = 3.0  # Altitude to takeoff to 3.0
 
         # Load trajectory data from CSV
-        data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory_reduced.csv')
+        data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory_reduced_20.csv')
         x = data['Drone_X']
         y = data['Drone_Y']
         z = data['Drone_Z'] - self.height_offset  # Adjust z with height offset
@@ -62,7 +62,7 @@ class TrajectoryPlanner(Node):
 
         # Dynamically calculate the number of ticks to wait at each point
         self.timer_period = 0.01  # Timer callback interval (in seconds)
-        self.total_execution_time = 2.0  # Total time to complete the trajectory (in seconds)
+        self.total_execution_time = 0.6  # Total time to complete the trajectory (in seconds)
         self.num_trajectory_points = len(self.trajectory_points)  # Number of points in the trajectory
 
         # Calculate total ticks for full trajectory and max wait ticks per point
@@ -194,7 +194,7 @@ class TrajectoryPlanner(Node):
                 # Hold position at the last trajectory point
                 if self.trajectory_points:
                     last_point = self.trajectory_points[-1]
-                    self.publish_trajectory_setpoint(last_point[0], last_point[1], last_point[2], self.current_yaw)
+                    self.publish_trajectory_setpoint(last_point[0], last_point[1], last_point[2] - self.height_offset, self.current_yaw)
 
                 if self.joystick_inputs.is_stop_trajectory_pressed() and not getattr(self, 'stop_trajectory_sent', False):
                     self.current_state = "IDLE"
