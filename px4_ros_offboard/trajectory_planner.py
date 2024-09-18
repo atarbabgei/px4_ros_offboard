@@ -40,11 +40,11 @@ class TrajectoryPlanner(Node):
         self.current_state = "IDLE"
         self.last_state = self.current_state
 
-        self.height_offset = 0.25  # Offset to add to the z position
+        self.height_offset = 0.00  # Offset to add to the z position
 
-        self.start_x = 2.0
+        self.start_x = 2.2
         self.start_y = 0.0
-        self.start_z = 1.2  # Altitude to takeoff to 3.0
+        self.start_z = 1.4  # Altitude to takeoff to 3.0
 
         # Load trajectory data from CSV
         data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory_reduced_20.csv')
