@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, GotoSetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
+from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
 from px4_ros_offboard.joy_inputs import JoystickInputs  # Ensure this is correctly imported
 import pandas as pd
 import numpy as np
@@ -14,7 +14,7 @@ class TrajectoryPlanner(Node):
     def __init__(self) -> None:
         super().__init__('position_control')
 
-        # Declare the use_world_frame parameter (default is True)
+        # Declare the use_world_frame parameter (default is False)
         self.declare_parameter('use_world_frame', False)
         self.use_world_frame = self.get_parameter('use_world_frame').get_parameter_value().bool_value
         self.get_logger().info(f"Position control frame set to {'World frame (NED)' if self.use_world_frame else 'Vehicle-relative frame (FLU)'}")
@@ -40,11 +40,11 @@ class TrajectoryPlanner(Node):
         self.current_state = "IDLE"
         self.last_state = self.current_state
 
-        self.height_offset = 0.5  # Offset to add to the z position
+        self.height_offset = 0.35  # Offset to add to the z position
 
         self.start_x = 2.0
         self.start_y = 0.0
-        self.start_z = 3.0  # Altitude to takeoff to 3.0
+        self.start_z = 2.2  # Altitude to takeoff to 3.0
 
         # Load trajectory data from CSV
         data = pd.read_csv('/home/atar/rolling_drone_ws/src/px4_ros_offboard/config/trajectory_reduced_20.csv')
@@ -60,16 +60,55 @@ class TrajectoryPlanner(Node):
         self.current_trajectory_point = 0
         self.trajectory_wait_counter = 0
 
-        # Dynamically calculate the number of ticks to wait at each point
-        self.timer_period = 0.01  # Timer callback interval (in seconds)
-        self.total_execution_time = 0.6  # Total time to complete the trajectory (in seconds)
-        self.num_trajectory_points = len(self.trajectory_points)  # Number of points in the trajectory
+        # Define maximum allowed velocity
+        self.max_velocity = 4.0  # Maximum allowed velocity in m/s
 
-        # Calculate total ticks for full trajectory and max wait ticks per point
-        self.total_ticks = int(self.total_execution_time / self.timer_period)  # Total ticks for the entire trajectory
-        self.max_wait_ticks = int(self.total_ticks / self.num_trajectory_points)  # Number of ticks per point
-    
-        self.get_logger().info(f"max_wait_ticks dynamically set to {self.max_wait_ticks} for {self.num_trajectory_points} trajectory points")
+        # Timer and total execution time
+        self.timer_period = 0.01  # Timer callback interval (in seconds)
+        self.total_execution_time = 1.0  # Desired total execution time in seconds
+
+        # Calculate total distance of the trajectory
+        total_distance = 0.0
+        self.segment_distances = []
+        for i in range(1, len(self.trajectory_points)):
+            prev_point = self.trajectory_points[i - 1]
+            current_point = self.trajectory_points[i]
+            dx = current_point[0] - prev_point[0]
+            dy = current_point[1] - prev_point[1]
+            dz = current_point[2] - prev_point[2]
+            distance = np.sqrt(dx**2 + dy**2 + dz**2)
+            self.segment_distances.append(distance)
+            total_distance += distance
+
+        # Calculate required average velocity
+        required_velocity = total_distance / self.total_execution_time
+
+        # Ensure required_velocity does not exceed maximum allowed velocity
+        if required_velocity > self.max_velocity:
+            self.get_logger().warning(
+                f"Required velocity {required_velocity:.2f} m/s exceeds maximum allowed velocity {self.max_velocity} m/s.")
+            required_velocity = self.max_velocity
+            self.total_execution_time = total_distance / required_velocity
+            self.get_logger().info(
+                f"Adjusted total execution time to {self.total_execution_time:.2f} seconds to meet velocity constraints.")
+
+        self.required_velocity = required_velocity  # Store for later use
+
+        # Calculate segment times and ticks based on required_velocity
+        self.segment_times = []
+        self.segment_ticks = []
+        self.total_ticks = 0
+        for distance in self.segment_distances:
+            segment_time = distance / required_velocity
+            segment_time = max(segment_time, self.timer_period)  # Ensure minimum segment time
+            self.segment_times.append(segment_time)
+            segment_ticks = int(segment_time / self.timer_period)
+            segment_ticks = max(segment_ticks, 1)  # Ensure at least one tick per segment
+            self.segment_ticks.append(segment_ticks)
+            self.total_ticks += segment_ticks
+
+        # Log total execution time
+        self.get_logger().info(f"Total execution time: {self.total_execution_time:.2f} seconds for {len(self.trajectory_points)} trajectory points.")
 
         # Create a timer to publish control commands
         self.timer = self.create_timer(self.timer_period, self.timer_callback)
@@ -194,7 +233,7 @@ class TrajectoryPlanner(Node):
                 # Hold position at the last trajectory point
                 if self.trajectory_points:
                     last_point = self.trajectory_points[-1]
-                    self.publish_trajectory_setpoint(last_point[0], last_point[1], last_point[2] - self.height_offset, self.current_yaw)
+                    self.publish_trajectory_setpoint(last_point[0], last_point[1], last_point[2] - 0.6, self.current_yaw)
 
                 if self.joystick_inputs.is_stop_trajectory_pressed() and not getattr(self, 'stop_trajectory_sent', False):
                     self.current_state = "IDLE"
@@ -215,25 +254,28 @@ class TrajectoryPlanner(Node):
 
     def execute_trajectory(self):
         """Execute the trajectory with dynamic interpolation for both position and velocity."""
-        if self.trajectory_wait_counter == 0 and self.current_trajectory_point < len(self.trajectory_points):
-            # Send the first point of the trajectory
-            self.trajectory_wait_counter += 1  # Start counting
-        elif self.trajectory_wait_counter < self.max_wait_ticks:
-            # Update the interpolated position and velocity
-            (target_position, target_velocity) = self.update_target_position()
-            self.publish_trajectory_setpoint(target_position[0], target_position[1], target_position[2], self.current_yaw, 
-                                             target_velocity[0], target_velocity[1], target_velocity[2])
-            self.get_logger().info(f"Target position: {target_position}, Target velocity: {target_velocity}")
-            self.trajectory_wait_counter += 1
+        if self.current_trajectory_point < len(self.trajectory_points) - 1:
+            if self.trajectory_wait_counter == 0:
+                self.current_segment_tick = 0
+                self.current_segment_total_ticks = self.segment_ticks[self.current_trajectory_point]
+                self.trajectory_wait_counter += 1  # Start counting
+            elif self.current_segment_tick < self.current_segment_total_ticks:
+                # Update the interpolated position and velocity
+                (target_position, target_velocity) = self.update_target_position()
+                self.publish_trajectory_setpoint(
+                    target_position[0], target_position[1], target_position[2], self.current_yaw,
+                    target_velocity[0], target_velocity[1], target_velocity[2])
+                self.current_segment_tick += 1
+            else:
+                # Move to the next point in the trajectory
+                self.current_trajectory_point += 1
+                self.trajectory_wait_counter = 0  # Reset wait counter
+                if self.current_trajectory_point >= len(self.trajectory_points) - 1:
+                    self.current_state = "HOLD"
+                    self.get_logger().info("Trajectory complete, switching to HOLD")
         else:
-            # Move to the next point in the trajectory
-            self.current_trajectory_point += 1
-            self.trajectory_wait_counter = 0  # Reset wait counter
-
-            # If we've completed all points, hold the position
-            if self.current_trajectory_point >= len(self.trajectory_points):
-                self.current_state = "HOLD"
-                self.get_logger().info("Trajectory complete, switching to HOLD")
+            self.current_state = "HOLD"
+            self.get_logger().info("Trajectory complete, switching to HOLD")
 
     def publish_trajectory_setpoint(self, position_x: float, position_y: float, position_z: float, yaw: float, 
                                     velocity_x: float = float('nan'), velocity_y: float = float('nan'), velocity_z: float = float('nan')):
@@ -242,7 +284,7 @@ class TrajectoryPlanner(Node):
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
 
         # Set the position
-        msg.position = [float(position_x), float(position_y), - float(position_z)]  # NED frame (z is negative)
+        msg.position = [float(position_x), float(position_y), -float(position_z)]  # NED frame (z is negative)
 
         # Set the velocity
         msg.velocity = [velocity_x, velocity_y, velocity_z]  # Velocity in X, Y, Z
@@ -256,36 +298,33 @@ class TrajectoryPlanner(Node):
 
     def update_target_position(self):
         """Update the target position and velocity for smooth transitions."""
-
-        total_time_steps = self.max_wait_ticks  # Use the max_wait_ticks to define total time for each point
-        current_time_step = self.trajectory_wait_counter
+        total_time_steps = self.current_segment_total_ticks
+        current_time_step = self.current_segment_tick
 
         # Calculate fraction of time elapsed
-        if total_time_steps == 0 or current_time_step >= total_time_steps:
-            fraction = 1  # Avoid division by zero or ensure full progress when time is up
-        else:
-            fraction = current_time_step / total_time_steps
+        fraction = min(current_time_step / total_time_steps, 1.0)
+
+        prev_point = self.trajectory_points[self.current_trajectory_point]
+        current_point = self.trajectory_points[self.current_trajectory_point + 1]
 
         # Interpolating position based on the fraction of total time elapsed
-        prev_point = self.trajectory_points[self.current_trajectory_point - 1]
-        current_point = self.trajectory_points[self.current_trajectory_point]
-
         target_x = prev_point[0] + fraction * (current_point[0] - prev_point[0])
         target_y = prev_point[1] + fraction * (current_point[1] - prev_point[1])
         target_z = prev_point[2] + fraction * (current_point[2] - prev_point[2])
 
-        # Calculate dynamic velocity during the first half of the trajectory
-        if fraction < 0.5:
-            time_remaining = (1 - fraction) * (total_time_steps * self.timer_period)
-            if time_remaining > 0:
-                velocity_x = (current_point[0] - self.current_position[0]) / time_remaining
-                velocity_y = (current_point[1] - self.current_position[1]) / time_remaining
-                velocity_z = (current_point[2] - self.current_position[2]) / time_remaining
-            else:
-                velocity_x, velocity_y, velocity_z = float('nan'), float('nan'), float('nan')
+        # Calculate velocity components
+        dx = current_point[0] - prev_point[0]
+        dy = current_point[1] - prev_point[1]
+        dz = current_point[2] - prev_point[2]
+        distance = self.segment_distances[self.current_trajectory_point]
+
+        if distance == 0:
+            velocity_x, velocity_y, velocity_z = 0.0, 0.0, 0.0
         else:
-            # As we approach the end, let the velocity slow down naturally
-            velocity_x, velocity_y, velocity_z = float('nan'), float('nan'), float('nan')
+            # Compute velocity components based on required_velocity
+            velocity_x = self.required_velocity * (dx / distance)
+            velocity_y = self.required_velocity * (dy / distance)
+            velocity_z = self.required_velocity * (dz / distance)
 
         return (target_x, target_y, target_z), (velocity_x, velocity_y, velocity_z)
 
