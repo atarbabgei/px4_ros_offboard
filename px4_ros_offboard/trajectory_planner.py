@@ -233,7 +233,7 @@ class TrajectoryPlanner(Node):
                 # Hold position at the last trajectory point
                 if self.trajectory_points:
                     last_point = self.trajectory_points[-1]
-                    self.publish_trajectory_setpoint(last_point[0], last_point[1], last_point[2] - 0.6, self.current_yaw)
+                    self.publish_trajectory_setpoint(last_point[0], last_point[1], last_point[2] - self.height_offset, self.current_yaw)
 
                 if self.joystick_inputs.is_stop_trajectory_pressed() and not getattr(self, 'stop_trajectory_sent', False):
                     self.current_state = "IDLE"
