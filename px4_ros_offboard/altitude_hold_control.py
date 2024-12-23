@@ -149,9 +149,6 @@ class AltholdControl(Node):
         """Publish the attitude setpoint."""
         msg = VehicleAttitudeSetpoint()
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        msg.roll_body = roll
-        msg.pitch_body = pitch
-        msg.yaw_body = yaw
         msg.yaw_sp_move_rate = 0.0
         msg.q_d = np.array(self.euler_to_quaternion(roll, pitch, yaw), dtype=np.float32)
         msg.thrust_body = np.array([0.0, 0.0, -thrust], dtype=np.float32)
