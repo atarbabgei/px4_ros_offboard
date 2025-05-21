@@ -14,7 +14,7 @@ Ensure the following dependencies are installed before running the launch files:
   - Install the `joy` package for joystick input:
 
     ```bash
-    sudo apt-get install ros-<your-ros-distro>-joy
+    sudo apt-get install ros-${ROS_DISTRO}-joy
     ```
 
 ## Installation
